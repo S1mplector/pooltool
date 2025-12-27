@@ -7,6 +7,7 @@ from pooltool.ani.menu._datatypes import BaseMenu
 
 class MenuRegistry:
     _menus: dict[str, type[BaseMenu]] = {}
+    _menu_instances: dict[str, BaseMenu] = {}
     _current_menu: BaseMenu | None = None
 
     @classmethod
@@ -25,11 +26,23 @@ class MenuRegistry:
         return menu_class()
 
     @classmethod
+    def get_or_create_menu(cls, name: str) -> BaseMenu:
+        """Get existing menu instance or create a new one."""
+        if name not in cls._menu_instances:
+            cls._menu_instances[name] = cls.create_menu(name)
+        return cls._menu_instances[name]
+
+    @classmethod
     def show_menu(cls, name: str) -> None:
         if cls._current_menu:
             cls._current_menu.hide()
 
-        cls._current_menu = cls.create_menu(name)
+        # Use persistent instances for multiplayer menus to keep client state
+        if name.startswith("multiplayer") or name == "create_room":
+            cls._current_menu = cls.get_or_create_menu(name)
+        else:
+            cls._current_menu = cls.create_menu(name)
+
         assert cls._current_menu is not None
         cls._current_menu.show()
 
@@ -42,6 +55,11 @@ class MenuRegistry:
     @classmethod
     def get_current_menu(cls) -> BaseMenu | None:
         return cls._current_menu
+
+    @classmethod
+    def get_menu(cls, name: str) -> BaseMenu | None:
+        """Get a menu instance by name if it exists."""
+        return cls._menu_instances.get(name)
 
 
 class MenuNavigator:
