@@ -21,6 +21,7 @@ class Mode(StrEnum):
     pick_ball = auto()
     purgatory = auto()
     shot = auto()
+    splash = auto()
     stroke = auto()
     view = auto()
     none = auto()

@@ -12,6 +12,7 @@ from pooltool.ani.modes.menu import MenuMode
 from pooltool.ani.modes.pick_ball import PickBallMode
 from pooltool.ani.modes.purgatory import PurgatoryMode
 from pooltool.ani.modes.shot import ShotMode
+from pooltool.ani.modes.splash import SplashMode
 from pooltool.ani.modes.stroke import StrokeMode
 from pooltool.ani.modes.view import ViewMode
 
@@ -32,6 +33,7 @@ __all__ = [
     "PickBallMode",
     "PurgatoryMode",
     "ShotMode",
+    "SplashMode",
     "StrokeMode",
     "ViewMode",
 ]

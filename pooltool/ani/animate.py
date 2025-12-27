@@ -468,7 +468,7 @@ class Game(Interface):
         tasks.register_event("enter-game", self._enter_game)
 
         Global.mode_mgr.update_event_baseline()
-        Global.mode_mgr.change_mode(Mode.menu)
+        Global.mode_mgr.change_mode(Mode.splash)
 
     def _enter_game(self):
         """Close the menu, setup the visualization, and start the game"""
