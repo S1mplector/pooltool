@@ -79,6 +79,19 @@ class MenuElementRegistry:
         self.elements.clear()
 
 
+class _NodeCleanup:
+    """Lightweight wrapper to allow raw Panda nodes in MenuElementRegistry."""
+
+    def __init__(self, node):
+        self.node = node
+
+    def cleanup(self) -> None:
+        try:
+            self.node.removeNode()
+        except Exception:
+            pass
+
+
 @attrs.define(kw_only=True)
 class MenuTitle:
     text: str
@@ -623,6 +636,7 @@ class BaseMenu(ABC):
         self.last_element: NodePath | None = None
         self.elements = MenuElementRegistry()
         self.hovered_entry: str | None = None
+        self._input_fields: list[DirectEntry] = []
 
         self._create_backdrop()
         self._create_scrolled_area()
@@ -669,10 +683,30 @@ class BaseMenu(ABC):
         self.area_backdrop.hide()
         self.area.hide()
         self._clear_elements()
+        self._input_fields.clear()
 
     def _clear_elements(self) -> None:
         self.elements.clear()
         self.last_element = None
+
+    def register_input_field(self, entry: DirectEntry) -> None:
+        """Track a DirectEntry so keybindings can respect focused text inputs."""
+        self._input_fields.append(entry)
+        self.elements.add(_NodeCleanup(entry))
+
+    def input_has_focus(self) -> bool:
+        """Return True if any registered input field currently has focus."""
+        for entry in self._input_fields:
+            try:
+                if entry.guiItem.getFocus():
+                    return True
+            except Exception:
+                try:
+                    if entry["focus"]:
+                        return True
+                except Exception:
+                    pass
+        return False
 
     def add_title(self, menu_title: MenuTitle) -> NodePath:
         title = menu_title.label

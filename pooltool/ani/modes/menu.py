@@ -63,6 +63,11 @@ class MenuMode(BaseMode):
                 sys.exit()
 
         if self.keymap[Action.new_game]:
+            if current_menu and hasattr(current_menu, "input_has_focus") and current_menu.input_has_focus():
+                # Ignore hotkeys while typing in an input field.
+                self.keymap[Action.new_game] = False
+                return task.cont
+
             Global.base.messenger.send("enter-game")
             return task.done
 

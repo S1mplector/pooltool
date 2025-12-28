@@ -53,10 +53,6 @@ def copy_to_clipboard(text: str) -> bool:
     except Exception:
         return False
 
-# Global tunnel state
-_tunnel_url: str | None = None
-_ngrok_process = None
-
 
 def get_local_ip() -> str:
     """Get the local IP address for sharing with friends."""
@@ -68,52 +64,6 @@ def get_local_ip() -> str:
         return ip
     except Exception:
         return "127.0.0.1"
-
-
-def start_tunnel(port: int = 7777) -> str | None:
-    """Start an ngrok tunnel to make server accessible over internet.
-    
-    Returns the public URL if successful, None otherwise.
-    Note: ngrok now requires credit card verification for TCP tunnels on free accounts.
-    """
-    global _tunnel_url, _ngrok_process
-    
-    try:
-        from pyngrok import ngrok, conf
-        from pyngrok.exception import PyngrokNgrokError
-        
-        # Configure ngrok
-        conf.get_default().log_level = "ERROR"
-        
-        # Start tunnel
-        tunnel = ngrok.connect(port, "tcp")
-        _tunnel_url = tunnel.public_url  # e.g., "tcp://0.tcp.ngrok.io:12345"
-        
-        # Parse the URL to get host:port
-        if _tunnel_url.startswith("tcp://"):
-            _tunnel_url = _tunnel_url[6:]  # Remove "tcp://" prefix
-        
-        return _tunnel_url
-    except ImportError:
-        # pyngrok not installed - fall back to local only
-        return None
-    except Exception as e:
-        # ngrok TCP endpoints now require credit card on free accounts
-        # Just silently fall back to LAN mode
-        return None
-
-
-def stop_tunnel() -> None:
-    """Stop the ngrok tunnel."""
-    global _tunnel_url, _ngrok_process
-    
-    try:
-        from pyngrok import ngrok
-        ngrok.kill()
-    except Exception:
-        pass
-    
-    _tunnel_url = None
 
 
 class MultiplayerMenu(BaseMenu):
@@ -253,11 +203,12 @@ class MultiplayerMenu(BaseMenu):
             frameColor=(1, 1, 1, 0.9),
             text_fg=(0, 0, 0, 1),
             text_font=font,
-            initialText="localhost",
+            initialText="host-ip:7777",
             numLines=1,
             parent=join_frame,
         )
         self.ip_entry.setPos(-0.25, 0, -0.12)
+        self.register_input_field(self.ip_entry)
 
         self.join_button = DirectButton(
             text="Join Game",
@@ -300,7 +251,7 @@ class MultiplayerMenu(BaseMenu):
             self.status_label["text_fg"] = color
 
     def _host_game(self) -> None:
-        """Start server and create a game room accessible over internet."""
+        """Start server for LAN/VPN play and create a game room."""
         self._update_status("Starting server...", (0.8, 0.8, 0.3, 1))
 
         # Start the server in a subprocess
@@ -311,50 +262,31 @@ class MultiplayerMenu(BaseMenu):
                 stderr=subprocess.PIPE,
             )
 
-            # Give server time to start, then create tunnel
+            # Give server time to start, then connect locally
             def setup_and_connect():
                 import time
                 time.sleep(1.0)
-                
-                # Try to create internet tunnel
-                self.public_url = start_tunnel(7777)
-                
-                if self.public_url:
-                    # Update UI on main thread
-                    Global.task_mgr.add(
-                        lambda task: self._on_tunnel_ready(self.public_url),
-                        "tunnel_ready_task"
-                    )
-                else:
-                    # Fall back to LAN only
-                    Global.task_mgr.add(
-                        lambda task: self._connect_as_host_lan(),
-                        "connect_as_host_task"
-                    )
+                Global.task_mgr.add(
+                    lambda task: self._connect_as_host_lan(),
+                    "connect_as_host_task"
+                )
 
             threading.Thread(target=setup_and_connect, daemon=True).start()
 
         except Exception as e:
             self._update_status(f"Failed to start server: {e}", (0.8, 0.3, 0.3, 1))
 
-    def _on_tunnel_ready(self, public_url: str) -> None:
-        """Handle tunnel being ready - update UI and connect."""
-        # Update IP label to show public URL
-        if self.ip_label:
-            self.ip_label["text"] = f"Share this address: {public_url}"
-            self.ip_label["text_fg"] = (0.3, 0.9, 0.3, 1)
-        
-        self._update_status("Internet tunnel ready!", (0.3, 0.8, 0.3, 1))
-        self._connect_as_host()
-
     def _connect_as_host_lan(self) -> None:
-        """Connect as host (LAN only mode)."""
+        """Connect as host (LAN or VPN like Hamachi)."""
         if self.ip_label:
             local_ip = get_local_ip()
-            self.ip_label["text"] = f"LAN only - Share IP: {local_ip}:7777"
-            self.ip_label["text_fg"] = (0.9, 0.7, 0.3, 1)
+            self.ip_label["text"] = (
+                f"Share your LAN/VPN IP + port 7777 (e.g., {local_ip}:7777).\n"
+                "If using Hamachi, share your Hamachi IPv4."
+            )
+            self.ip_label["text_fg"] = (0.3, 0.9, 0.3, 1)
         
-        self._update_status("Server ready (LAN only - install pyngrok for internet)", (0.9, 0.7, 0.3, 1))
+        self._update_status("Server ready for LAN/VPN play", (0.3, 0.8, 0.3, 1))
         self._connect_as_host()
 
     def _connect_as_host(self) -> None:
@@ -365,13 +297,13 @@ class MultiplayerMenu(BaseMenu):
         Global.task_mgr.add(self._update_client, "multiplayer_client_update")
 
     def _join_game(self) -> None:
-        """Join a remote game (supports both IP and ngrok URLs)."""
+        """Join a remote game (LAN or VPN IP:port)."""
         address = self.ip_entry.get().strip()
         if not address:
-            self._update_status("Please enter an address", (0.8, 0.3, 0.3, 1))
+            self._update_status("Please enter the host's IP (LAN/Hamachi)", (0.8, 0.3, 0.3, 1))
             return
 
-        # Parse address - could be "ip", "ip:port", or "host.ngrok.io:port"
+        # Parse address - expected "ip" or "ip:port"
         if ":" in address:
             parts = address.rsplit(":", 1)
             host = parts[0]

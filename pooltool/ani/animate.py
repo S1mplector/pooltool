@@ -4,6 +4,8 @@ import gc
 import sys
 from collections.abc import Generator
 
+from pooltool.config import settings
+
 import simplepbr
 from attrs import define
 from direct.showbase.ShowBase import ShowBase
@@ -26,7 +28,6 @@ from pooltool.ani.menu import MenuRegistry
 from pooltool.ani.modes import Mode, ModeManager, all_modes
 from pooltool.ani.mouse import mouse
 from pooltool.ani.scene import PlaybackMode, visual
-from pooltool.config import settings
 from pooltool.evolution import simulate
 from pooltool.evolution.continuous import continuize
 from pooltool.layouts import get_rack
@@ -39,6 +40,58 @@ from pooltool.system.datatypes import MultiSystem, System, multisystem
 from pooltool.utils import Run, get_total_memory_usage, human_readable_file_size
 
 run = Run()
+
+
+def _window_properties_with_origin() -> WindowProperties:
+    """Create WindowProperties seeded with the current window origin."""
+    props = WindowProperties()
+    try:
+        win_props = Global.base.win.getProperties()
+        if win_props.hasOrigin():
+            props.setOrigin(win_props.getXOrigin(), win_props.getYOrigin())
+        else:
+            props.setOrigin(0, 0)
+    except Exception:
+        # Fallback to a safe origin to ensure hasOrigin() is true.
+        props.setOrigin(0, 0)
+    return props
+
+
+_PENDING_WINDOW_RESIZE_TASK: str | None = None
+
+
+def _apply_pending_window_resize(task):
+    """Apply the queued window resize on the next frame."""
+    global _PENDING_WINDOW_RESIZE_TASK
+    try:
+        width = getattr(Global.base, "_pending_resize_width", None)
+        height = getattr(Global.base, "_pending_resize_height", None)
+        if width and height:
+            properties = _window_properties_with_origin()
+            properties.setSize(width, height)
+            try:
+                Global.base.win.requestProperties(properties)
+            except (AttributeError, AssertionError):
+                pass
+    finally:
+        _PENDING_WINDOW_RESIZE_TASK = None
+    return task.done
+
+
+def _schedule_window_resize(width: int, height: int):
+    """Queue a window resize to avoid re-entrancy during window-event handling."""
+    global _PENDING_WINDOW_RESIZE_TASK
+    try:
+        Global.base._pending_resize_width = int(width)
+        Global.base._pending_resize_height = int(height)
+    except Exception:
+        return
+
+    if _PENDING_WINDOW_RESIZE_TASK:
+        return
+
+    _PENDING_WINDOW_RESIZE_TASK = "apply-window-resize"
+    Global.task_mgr.doMethodLater(0, _apply_pending_window_resize, _PENDING_WINDOW_RESIZE_TASK)
 
 
 @define
@@ -113,12 +166,7 @@ def window_task(win=None):
     height = (requested_area / settings.system.aspect_ratio) ** (1 / 2)
     width = height * settings.system.aspect_ratio
 
-    properties = WindowProperties()
-    properties.setSize(int(width), int(height))
-    try:
-        Global.base.win.requestProperties(properties)
-    except (AttributeError, AssertionError):
-        pass
+    _schedule_window_resize(int(width), int(height))
 
 
 def _resize_offscreen_window(size: tuple[int, int]):
@@ -142,6 +190,8 @@ class Interface(ShowBase):
         self.openMainWindow(
             fbprops=self.showbase_config.fb_prop, size=self.showbase_config.window_size
         )
+        self._seed_window_origin_request()
+        self._apply_window_origin()
 
         # Background doesn't apply if ran after simplepbr.init(). See
         # https://discourse.panda3d.org/t/cant-change-base-background-after-simplepbr-init/28945
@@ -170,6 +220,7 @@ class Interface(ShowBase):
         if self.showbase_config.monitor:
             tasks.add(self.monitor, "monitor")
 
+        tasks.add(self._ensure_window_origin, "ensure-window-origin", sort=49)
         self._listen_constant_events()
         
         # Mark window as ready after a few frames
@@ -180,11 +231,45 @@ class Interface(ShowBase):
         self._window_ready = True
         return task.done
 
+    def _seed_window_origin_request(self):
+        """Ensure requested window properties include the current origin."""
+        try:
+            self._apply_window_origin()
+        except Exception:
+            pass
+
+    def _apply_window_origin(self):
+        """Apply an origin to the requested properties without altering size."""
+        props = WindowProperties()
+        props.setOrigin(0, 0)
+        props.setSize(self.win.getXSize(), self.win.getYSize())
+        self.win.requestProperties(props)
+
+    def _ensure_window_origin(self, task):
+        """Keep the window's requested properties carrying an origin flag."""
+        try:
+            self._apply_window_origin()
+        except Exception:
+            pass
+        return task.cont
+
     def _listen_constant_events(self):
         """Listen for events that are mode independent"""
         tasks.register_event("window-event", window_task)
         tasks.register_event("close-scene", self.close_scene)
         tasks.register_event("toggle-help", hud.toggle_help)
+
+    def windowEvent(self, win):
+        """Ensure window-origin is always set before delegating to ShowBase."""
+        try:
+            props = win.getProperties()
+            if not props.hasOrigin():
+                patched = WindowProperties(props)
+                patched.setOrigin(0, 0)
+                win.requestProperties(patched)
+        except Exception:
+            pass
+        return super().windowEvent(win)
 
     def close_scene(self):
         # Ensure parallel mode is exited
@@ -565,7 +650,21 @@ class Game(Interface):
         Global.game = ruleset
 
     def start(self):
-        Global.task_mgr.run()
+        while True:
+            try:
+                Global.task_mgr.step()
+            except SystemExit:
+                break
+            except AssertionError as err:
+                # macOS can report window properties without an origin during startup.
+                # Re-apply the origin and keep running.
+                if "has_origin" in str(err):
+                    try:
+                        self._apply_window_origin()
+                    except Exception:
+                        pass
+                    continue
+                raise
 
 
 __all__ = [

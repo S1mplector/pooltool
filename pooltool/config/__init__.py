@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import attrs
-from panda3d.core import loadPrcFileData
+from panda3d.core import WindowProperties, loadPrcFileData
 
 from pooltool.config.paths import GENERAL_CONFIG
 from pooltool.game.datatypes import GameType
@@ -70,6 +70,15 @@ class SystemConfig:
         loadPrcFileData(
             "", f"show-frame-rate-meter {'#t' if self.show_frame_rate else '#f'}"
         )
+        # Explicitly set window origin so Panda3D marks the property as present.
+        # Without this, certain platforms (macOS) trigger has_origin assertions when
+        # the engine queries the window position during startup.
+        loadPrcFileData("", "win-origin 0 0")
+        # Prevent OS-driven resizes/moves that drop the origin flag on macOS.
+        loadPrcFileData("", "win-fixed-size #t")
+        default_props = WindowProperties.getDefault()
+        default_props.setOrigin(0, 0)
+        WindowProperties.setDefault(default_props)
         loadPrcFileData("", f"win-size {self.window_width} {self.window_height}")
         loadPrcFileData("", "fullscreen #f")  # hard-coded, fullscreen broken
         loadPrcFileData("", f"sync-video {'#t' if self.sync_video else '#f'}")

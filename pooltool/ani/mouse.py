@@ -18,6 +18,19 @@ class Mouse(ClockObject):
         self.relative_requested = False
         self.initialized = False
 
+    @staticmethod
+    def _with_window_origin() -> WindowProperties:
+        """Return WindowProperties seeded with the current window origin."""
+        props = WindowProperties()
+        try:
+            win_props = Global.base.win.getProperties()
+            if win_props.hasOrigin():
+                props.setOrigin(win_props.getXOrigin(), win_props.getYOrigin())
+        except Exception:
+            # If the window is not ready yet, just return empty properties.
+            pass
+        return props
+
     def __enter__(self):
         return self
 
@@ -46,17 +59,17 @@ class Mouse(ClockObject):
         self.initialized = True
 
     def hide(self):
-        props = WindowProperties()
+        props = self._with_window_origin()
         props.setCursorHidden(True)
         Global.base.win.requestProperties(props)
 
     def show(self):
-        props = WindowProperties()
+        props = self._with_window_origin()
         props.setCursorHidden(False)
         Global.base.win.requestProperties(props)
 
     def absolute(self):
-        props = WindowProperties()
+        props = self._with_window_origin()
         props.setMouseMode(WindowProperties.M_absolute)
         Global.base.win.requestProperties(props)
 
@@ -65,7 +78,7 @@ class Mouse(ClockObject):
 
     def relative(self):
         if self.mouse.hasMouse():
-            props = WindowProperties()
+            props = self._with_window_origin()
             props.setMouseMode(WindowProperties.M_relative)
             Global.base.win.requestProperties(props)
             self.relative_requested = False

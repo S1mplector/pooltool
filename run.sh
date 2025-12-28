@@ -70,14 +70,6 @@ else
     echo -e "${GREEN}✓${NC} Dependencies already installed"
 fi
 
-# Check for pyngrok (for internet multiplayer)
-if python -c "import pyngrok" 2>/dev/null; then
-    echo -e "${GREEN}✓${NC} Internet multiplayer ready (pyngrok installed)"
-else
-    echo -e "${YELLOW}!${NC} pyngrok not found - multiplayer will be LAN only"
-    echo "  To enable internet play: pip install pyngrok"
-fi
-
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}                      Starting Pooltool Online...                         ${NC}"
