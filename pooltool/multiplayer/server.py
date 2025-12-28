@@ -74,6 +74,7 @@ class MultiplayerServer:
             MessageType.GAME_START: self._handle_game_start_request,
             MessageType.SHOT_AIM: self._handle_shot_aim,
             MessageType.SHOT_EXECUTE: self._handle_shot_execute,
+            MessageType.SHOT_RESULT: self._handle_shot_result,
             MessageType.CHAT_MESSAGE: self._handle_chat_message,
         }
 
@@ -189,6 +190,16 @@ class MultiplayerServer:
             if player.player_id != exclude_client:
                 await self._send_message(player.player_id, message)
 
+    async def _send_error(self, client_id: str, error_msg: str) -> None:
+        """Send an error message to a specific client."""
+        message = GameMessage(
+            msg_type=MessageType.ERROR,
+            sender_id="server",
+            data={"error": error_msg},
+            timestamp=time.time(),
+        )
+        await self._send_message(client_id, message)
+
     async def _disconnect_client(self, client_id: str) -> None:
         """Disconnect a client and clean up their resources."""
         if client_id not in self.clients:
@@ -293,7 +304,7 @@ class MultiplayerServer:
 
         player_info = self.clients[client_id].player_info
         player_info.is_host = True
-        player_info.is_ready = False
+        player_info.is_ready = True  # Host is automatically ready
 
         room = RoomInfo(
             room_id=room_id,
@@ -544,6 +555,62 @@ class MultiplayerServer:
             timestamp=time.time(),
         )
         await self._broadcast_to_room(room.room_id, shot_msg)
+
+    async def _handle_shot_result(self, client_id: str, message: GameMessage) -> None:
+        """Handle shot result and update game state."""
+        client = self.clients.get(client_id)
+        if not client or not client.room_id:
+            return
+
+        room = self.rooms.get(client.room_id)
+        game_state = self.game_states.get(client.room_id)
+        if not room or not game_state:
+            return
+
+        # Only accept results from current player
+        if game_state.current_player_id != client_id:
+            return
+
+        # Update game state
+        game_state.ball_positions = message.data.get("ball_positions", {})
+        game_state.ball_states = message.data.get("ball_states", {})
+        game_state.score = message.data.get("score", game_state.score)
+        game_state.shot_number += 1
+
+        next_player_id = message.data.get("next_player_id", "")
+        is_game_over = message.data.get("is_game_over", False)
+        winner_id = message.data.get("winner_id")
+
+        if is_game_over:
+            game_state.is_game_over = True
+            game_state.winner_id = winner_id
+
+            # Broadcast game over
+            game_over_msg = GameMessage(
+                msg_type=MessageType.GAME_OVER,
+                sender_id="server",
+                data={
+                    "winner_id": winner_id,
+                    "score": game_state.score,
+                },
+                timestamp=time.time(),
+            )
+            await self._broadcast_to_room(room.room_id, game_over_msg)
+        else:
+            # Update current player and broadcast turn change
+            game_state.current_player_id = next_player_id
+            game_state.turn_number += 1
+
+            turn_msg = GameMessage(
+                msg_type=MessageType.TURN_CHANGE,
+                sender_id="server",
+                data={
+                    "next_player_id": next_player_id,
+                    "game_state": attrs.asdict(game_state),
+                },
+                timestamp=time.time(),
+            )
+            await self._broadcast_to_room(room.room_id, turn_msg)
 
     async def _handle_chat_message(self, client_id: str, message: GameMessage) -> None:
         """Handle chat message."""

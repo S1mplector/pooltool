@@ -68,6 +68,9 @@ class MultiplayerClient:
     _thread: threading.Thread | None = attrs.field(default=None, repr=False)
     _running: bool = attrs.field(default=False, repr=False)
     _message_queue: Queue = attrs.field(factory=Queue, repr=False)
+    _last_pong_time: float = attrs.field(default=0.0, repr=False)
+    _ping_interval: float = attrs.field(default=5.0, repr=False)  # Send ping every 5 seconds
+    _ping_timeout: float = attrs.field(default=15.0, repr=False)  # Disconnect if no pong for 15 seconds
 
     def connect(self, host: str, port: int, name: str) -> bool:
         """Connect to a multiplayer server.
@@ -323,6 +326,10 @@ class MultiplayerClient:
             self._writer.write((connect_msg.to_json() + "\n").encode())
             await self._writer.drain()
 
+            # Initialize ping timing
+            self._last_pong_time = time.time()
+            last_ping_time = time.time()
+
             # Listen for messages
             while self._running:
                 try:
@@ -337,6 +344,24 @@ class MultiplayerClient:
                     self._message_queue.put(message)
 
                 except asyncio.TimeoutError:
+                    # Check if we need to send a ping
+                    current_time = time.time()
+                    if current_time - last_ping_time >= self._ping_interval:
+                        await self._send_ping()
+                        last_ping_time = current_time
+
+                    # Check for ping timeout
+                    if current_time - self._last_pong_time > self._ping_timeout:
+                        logger.warning("Server ping timeout - disconnecting")
+                        self._message_queue.put(
+                            GameMessage(
+                                msg_type=MessageType.ERROR,
+                                sender_id="client",
+                                data={"error": "Connection timeout"},
+                                timestamp=time.time(),
+                            )
+                        )
+                        break
                     continue
                 except Exception as e:
                     logger.error(f"Error receiving message: {e}")
@@ -344,15 +369,14 @@ class MultiplayerClient:
 
         except ConnectionRefusedError:
             logger.error(f"Connection refused to {self.host}:{self.port}")
-            if self.on_error:
-                self._message_queue.put(
-                    GameMessage(
-                        msg_type=MessageType.ERROR,
-                        sender_id="client",
-                        data={"error": "Connection refused"},
-                        timestamp=time.time(),
-                    )
+            self._message_queue.put(
+                GameMessage(
+                    msg_type=MessageType.ERROR,
+                    sender_id="client",
+                    data={"error": "Connection refused"},
+                    timestamp=time.time(),
                 )
+            )
         except Exception as e:
             logger.error(f"Connection error: {e}")
         finally:
@@ -365,6 +389,21 @@ class MultiplayerClient:
                     await self._writer.wait_closed()
                 except Exception:
                     pass
+
+    async def _send_ping(self) -> None:
+        """Send a ping message to the server."""
+        if self._writer:
+            ping_msg = GameMessage(
+                msg_type=MessageType.PING,
+                sender_id=self.player_id,
+                data={"time": time.time()},
+                timestamp=time.time(),
+            )
+            try:
+                self._writer.write((ping_msg.to_json() + "\n").encode())
+                await self._writer.drain()
+            except Exception as e:
+                logger.error(f"Error sending ping: {e}")
 
     def _handle_message(self, message: GameMessage) -> None:
         """Handle an incoming message."""
@@ -381,6 +420,7 @@ class MultiplayerClient:
             MessageType.TURN_CHANGE: self._on_turn_change,
             MessageType.GAME_OVER: self._on_game_over,
             MessageType.CHAT_MESSAGE: self._on_chat_message,
+            MessageType.PONG: self._on_pong,
             MessageType.ERROR: self._on_error,
         }
 
@@ -493,6 +533,10 @@ class MultiplayerClient:
 
         if self.on_chat_message:
             self.on_chat_message(name, text)
+
+    def _on_pong(self, message: GameMessage) -> None:
+        """Handle pong response from server."""
+        self._last_pong_time = time.time()
 
     def _on_error(self, message: GameMessage) -> None:
         """Handle error message."""

@@ -458,6 +458,7 @@ class MultiplayerLobbyMenu(BaseMenu):
     def __init__(self) -> None:
         super().__init__()
         self._dynamic_elements = []
+        self._callbacks_registered = False
 
     def _clear_dynamic_elements(self) -> None:
         """Clear all dynamically created elements to prevent overlap on refresh."""
@@ -488,6 +489,11 @@ class MultiplayerLobbyMenu(BaseMenu):
         mp_menu = MenuRegistry.get_menu("multiplayer")
         client = mp_menu.client if mp_menu and hasattr(mp_menu, "client") else None
         room = client.current_room if client else None
+
+        # Register callbacks for auto-refresh (only once)
+        if client and not self._callbacks_registered:
+            self._register_lobby_callbacks(client)
+            self._callbacks_registered = True
 
         # Determine if current player is host
         is_host = False
@@ -600,30 +606,43 @@ class MultiplayerLobbyMenu(BaseMenu):
         # Buttons section
         btn_y = -0.35
 
-        # Ready button - larger and more clickable
-        ready_btn = DirectButton(
-            text="READY!" if not is_ready else "NOT READY",
-            text_align=TextNode.ACenter,
-            text_font=font,
-            scale=BUTTON_TEXT_SCALE * 1.3,
-            relief=DGG.RIDGE,
-            frameColor=(0.2, 0.7, 0.2, 1) if not is_ready else (0.7, 0.3, 0.3, 1),
-            frameSize=(-0.4, 0.4, -0.07, 0.09),
-            command=self._toggle_ready,
-            parent=self.area.getCanvas(),
-        )
-        ready_btn.setPos(0, 0, btn_y)
-        self._dynamic_elements.append(ready_btn)
-
-        # Start Game button - only for host when all ready
-        if is_host:
-            btn_y -= 0.18
-            start_enabled = all_ready
-            start_btn = DirectButton(
-                text="START GAME" if start_enabled else "Waiting...",
+        # Ready button - only for non-host players (host is auto-ready)
+        if not is_host:
+            ready_btn = DirectButton(
+                text="READY!" if not is_ready else "NOT READY",
                 text_align=TextNode.ACenter,
                 text_font=font,
-                scale=BUTTON_TEXT_SCALE * 1.2,
+                scale=BUTTON_TEXT_SCALE * 1.3,
+                relief=DGG.RIDGE,
+                frameColor=(0.2, 0.7, 0.2, 1) if not is_ready else (0.7, 0.3, 0.3, 1),
+                frameSize=(-0.4, 0.4, -0.07, 0.09),
+                command=self._toggle_ready,
+                parent=self.area.getCanvas(),
+            )
+            ready_btn.setPos(0, 0, btn_y)
+            self._dynamic_elements.append(ready_btn)
+            btn_y -= 0.18
+
+        # Start Game button - only for host
+        if is_host:
+            # Check if we need more players
+            need_players = not room or len(room.players) < 2
+            # Check if all non-host players are ready
+            others_ready = room and all(p.is_ready for p in room.players if not p.is_host)
+            start_enabled = not need_players and others_ready
+
+            if need_players:
+                status_text = "Waiting for player..."
+            elif not others_ready:
+                status_text = "Waiting for ready..."
+            else:
+                status_text = "START GAME"
+
+            start_btn = DirectButton(
+                text=status_text,
+                text_align=TextNode.ACenter,
+                text_font=font,
+                scale=BUTTON_TEXT_SCALE * 1.3,
                 relief=DGG.RIDGE,
                 frameColor=(0.8, 0.6, 0.1, 1) if start_enabled else (0.3, 0.3, 0.3, 1),
                 frameSize=(-0.4, 0.4, -0.07, 0.09),
@@ -683,4 +702,57 @@ class MultiplayerLobbyMenu(BaseMenu):
         if mp_menu and hasattr(mp_menu, "client") and mp_menu.client:
             mp_menu.client.leave_room()
 
+        self._callbacks_registered = False
         MenuNavigator.go_to_menu("multiplayer")()
+
+    def _register_lobby_callbacks(self, client) -> None:
+        """Register callbacks for lobby auto-refresh."""
+        # Store original callbacks to chain them
+        original_room_update = client.on_room_update
+        original_game_start = client.on_game_start
+        original_error = client.on_error
+
+        def on_room_update(room):
+            # Call original if it exists
+            if original_room_update:
+                original_room_update(room)
+            # Refresh lobby UI
+            self._refresh_lobby()
+
+        def on_game_start(game_state):
+            # Call original if it exists
+            if original_game_start:
+                original_game_start(game_state)
+            # Transition to game
+            self._on_game_start(game_state)
+
+        def on_error(error):
+            # Call original if it exists
+            if original_error:
+                original_error(error)
+            # Show error in lobby
+            self._on_lobby_error(error)
+
+        client.on_room_update = on_room_update
+        client.on_game_start = on_game_start
+        client.on_error = on_error
+
+    def _refresh_lobby(self) -> None:
+        """Refresh the lobby display."""
+        # Only refresh if we're currently showing the lobby
+        from pooltool.ani.menu._registry import MenuRegistry
+        current = MenuRegistry.get_current_menu()
+        if current and current.name == "multiplayer_lobby":
+            # Re-populate to refresh the UI
+            self.hide()
+            self.show()
+
+    def _on_game_start(self, game_state) -> None:
+        """Handle game start - transition all players to game."""
+        self._callbacks_registered = False
+        Global.base.messenger.send("enter-game")
+
+    def _on_lobby_error(self, error: str) -> None:
+        """Handle error in lobby."""
+        # Could show a toast/notification here
+        pass
