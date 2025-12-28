@@ -94,6 +94,42 @@ def _schedule_window_resize(width: int, height: int):
     Global.task_mgr.doMethodLater(0, _apply_pending_window_resize, _PENDING_WINDOW_RESIZE_TASK)
 
 
+_CURRENT_UI_SCALE: float = 1.0
+
+
+def _compute_ui_scale() -> float:
+    """Return a UI scale factor that compensates for high-DPI backbuffers.
+
+    On macOS Retina displays, the framebuffer can be 2x (or more) the requested
+    window size, which makes HUD elements appear oversized and clipped. We
+    normalize the 2D scene to the configured logical height to keep UI readable.
+    """
+    try:
+        win_height = Global.base.win.getYSize()
+        if win_height <= 0:
+            return 1.0
+        target_height = settings.system.window_height
+        # Never upscale above 1.0; clamp lower bound to avoid vanishing HUD.
+        return max(0.35, min(1.0, target_height / win_height))
+    except Exception:
+        return 1.0
+
+
+def _apply_ui_scale_if_needed():
+    """Apply the computed UI scale to aspect2d/render2d when it changes."""
+    global _CURRENT_UI_SCALE
+    scale = _compute_ui_scale()
+    if abs(scale - _CURRENT_UI_SCALE) < 1e-3:
+        return
+
+    _CURRENT_UI_SCALE = scale
+    try:
+        Global.aspect2d.setScale(scale)
+        Global.render2d.setScale(scale)
+    except Exception:
+        pass
+
+
 @define
 class ShowBaseConfig:
     window_type: str | None = None
@@ -152,6 +188,7 @@ def window_task(win=None):
 
     requested_width = Global.base.win.getXSize()
     requested_height = Global.base.win.getYSize()
+    _apply_ui_scale_if_needed()
 
     diff = abs(requested_width / requested_height - settings.system.aspect_ratio)
     if diff / settings.system.aspect_ratio < 0.05:
@@ -192,6 +229,7 @@ class Interface(ShowBase):
         )
         self._seed_window_origin_request()
         self._apply_window_origin()
+        _apply_ui_scale_if_needed()
 
         # Background doesn't apply if ran after simplepbr.init(). See
         # https://discourse.panda3d.org/t/cant-change-base-background-after-simplepbr-init/28945
@@ -269,6 +307,7 @@ class Interface(ShowBase):
                 win.requestProperties(patched)
         except Exception:
             pass
+        _apply_ui_scale_if_needed()
         return super().windowEvent(win)
 
     def close_scene(self):
@@ -553,6 +592,7 @@ class ShotViewer(Interface):
 
     def _start(self):
         self.openMainWindow(keepCamera=True)
+        _apply_ui_scale_if_needed()
         self.simplepbr_pipeline = _init_simplepbr()
         mouse.init()
 

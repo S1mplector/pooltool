@@ -1,10 +1,17 @@
 from collections.abc import Callable
 
 from pooltool.ani.globals import Global
-from pooltool.ani.menu._datatypes import BaseMenu, MenuBackButton, MenuHeader, MenuTitle
+from pooltool.ani.menu._datatypes import (
+    BaseMenu,
+    MenuBackButton,
+    MenuHeader,
+    MenuTitle,
+    MenuDropdown,
+)
 from pooltool.ani.menu._factory import create_elements_from_dataclass
 from pooltool.ani.menu._registry import MenuNavigator
 from pooltool.config import settings
+from panda3d.core import WindowProperties
 
 
 def _fps_wrap(func: Callable[[str], None]) -> Callable[[str], None]:
@@ -39,3 +46,49 @@ class SettingsMenu(BaseMenu):
                 entry["command"] = _fps_wrap(entry["command"])
 
             self.add_element(element)
+
+        self.add_header(MenuHeader.create(text="Window"))
+
+        aspect = settings.system.aspect_ratio
+        widths = [1024, 1280, 1400, 1440, 1600, 1920, 2560]
+        options = [f"{w} x {int(w / aspect)}" for w in widths]
+
+        current_w = settings.system.window_width
+        try:
+            initial = f"{current_w} x {int(current_w / aspect)}"
+        except Exception:
+            initial = options[0]
+
+        def _on_resolution_select(value: str) -> None:
+            try:
+                w = int(value.split("x")[0].strip())
+            except Exception:
+                return
+
+            h = int(w / settings.system.aspect_ratio)
+
+            with settings.write() as s:
+                s.system.window_width = w
+
+            try:
+                props = WindowProperties()
+                try:
+                    win_props = Global.base.win.getProperties()
+                    if win_props.hasOrigin():
+                        props.setOrigin(win_props.getXOrigin(), win_props.getYOrigin())
+                except Exception:
+                    pass
+                props.setSize(w, h)
+                Global.base.win.requestProperties(props)
+            except Exception:
+                pass
+
+        res_dropdown = MenuDropdown.create(
+            name="Resolution",
+            options=options,
+            initial_selection=initial if initial in options else options[0],
+            description="",
+            command=_on_resolution_select,
+        )
+
+        self.add_dropdown(res_dropdown)

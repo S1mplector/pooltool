@@ -3,6 +3,7 @@ from __future__ import annotations
 from attrs import define
 from direct.interval.IntervalGlobal import Func, Parallel, Sequence, Wait
 from panda3d.direct import HideInterval, ShowInterval
+from pathlib import Path
 
 from pooltool.ani.environment import Environment
 from pooltool.ani.hud import hud
@@ -13,6 +14,9 @@ from pooltool.objects.table.render import TableRender
 from pooltool.system.datatypes import System, multisystem
 from pooltool.system.render import SystemRender
 from pooltool.utils.strenum import StrEnum, auto
+from pooltool.events.datatypes import EventType
+from pooltool.utils import panda_path
+from pooltool.ani.globals import Global
 
 
 class PlaybackMode(StrEnum):
@@ -214,6 +218,7 @@ class SceneController:
         self.playback_speed: float = 1
         self.playback_mode: PlaybackMode = PlaybackMode.SINGLE
         self.parallel_manager: ParallelModeManager = ParallelModeManager.create()
+        self._ball_hit_sfx = None
 
     @property
     def table(self) -> TableRender:
@@ -527,12 +532,46 @@ class SceneController:
             self.system.cue.get_stroke_sequence(),
             HideInterval(self.system.cue.get_node("cue_stick")),
         )
+
+        sound_timeline = Sequence()
+        try:
+            events = [e for e in multisystem.active.events if e.event_type == EventType.BALL_BALL]
+            events.sort(key=lambda e: e.time)
+            last_t = 0.0
+            for e in events:
+                t = max(0.0, float(e.time))
+                dt = max(0.0, t - last_t)
+                # Scale by playback speed to keep audio in sync with animation
+                scaled_dt = dt / (self.playback_speed if self.playback_speed > 0 else 1.0)
+                sound_timeline.append(Wait(scaled_dt))
+                sound_timeline.append(Func(self._play_ball_hit))
+                last_t = t
+        except Exception:
+            pass
+
         self.shot_animation = Sequence(
             Func(self.restart_ball_animations),
             self.stroke_animation,
-            self.ball_animations,
+            Parallel(self.ball_animations, sound_timeline),
             Wait(trailing_buffer),
         )
+
+    def _play_ball_hit(self):
+        try:
+            if self._ball_hit_sfx is None:
+                sfx_path = panda_path(Path(__file__).resolve().parent.parent / "sfx" / "ball_hit.mp3")
+                # Prefer loader from Global to ensure it's initialized
+                self._ball_hit_sfx = Global.loader.loadSfx(str(sfx_path))
+                if self._ball_hit_sfx:
+                    # Set a reasonable default volume to avoid clipping
+                    self._ball_hit_sfx.setVolume(0.4)
+            if self._ball_hit_sfx:
+                # Restart if already playing to layer rapid hits cleanly
+                self._ball_hit_sfx.stop()
+                self._ball_hit_sfx.play()
+        except Exception:
+            # Fail silently; audio playback shouldn't break animation
+            pass
 
 
 visual = SceneController()
