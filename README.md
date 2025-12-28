@@ -6,19 +6,19 @@ A fork of pooltool with online multiplayer.
 
 # Description
 
-*Pooltool Online* is a realistic billiards simulator featuring:
+*Pooltool Online* is a fork of the realistic billiards simulator featuring:
 
-- 🌐 **Online Multiplayer** - Play pool with friends over the internet
-- 🎮 **3D Graphics** - Powered by Panda3D
-- 🎯 **Realistic Physics** - Accurate ball dynamics and collision detection
-- 🎱 **Multiple Game Modes** - 8-ball, 9-ball, snooker, and more
-- 🔧 **Extensible API** - Build your own pool AI or custom game modes
+- **Online Multiplayer** - Play pool with friends over the internet
+- **3D Graphics** - Powered by Panda3D
+- **Realistic Physics** - Accurate ball dynamics and collision detection
+- **Multiple Game Modes** - 8-ball, 9-ball, snooker, and more
+- **Extensible API** - Build your own pool AI or custom game modes
 
 ## New in this Fork
 
-- 🌐 **Online Multiplayer System** - Full client/server architecture
-- 🏠 **Room-based Matchmaking** - Create and join game rooms
-- 💬 **Real-time Sync** - See opponent shots live
+- **Online Multiplayer System** - Full client/server architecture
+- **Room-based Matchmaking** - Create and join game rooms
+- **Real-time Sync** - See opponent shots live
 
 # Gallery
 
